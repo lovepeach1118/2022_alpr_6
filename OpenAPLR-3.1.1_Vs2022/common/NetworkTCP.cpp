@@ -301,56 +301,63 @@ ssize_t BytesAvailableTcp(TTcpConnectedPort* TcpConnectedPort)
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
 {
  ssize_t bytes;
-
  ByteArray aesKey(AES_KEY_SIZE);
- ByteArray plainData(length);
- ByteArray encryptData;
+ //ByteArray plainData(length);
+ //ByteArray encryptData;;
  ByteArray descryptData;
- unsigned char temp[200] = { 0, };
- int real_length = (length / 16 + 1) * 16 + 1;
+
+ int encryptedLength = (length / AES_BLOCK_SIZE + 1) * AES_BLOCK_SIZE + 1;
+ unsigned char* receiveData = new unsigned char(encryptedLength);
 
  for (int i = 0; i < AES_KEY_SIZE; i++) {
      aesKey[i] = aesPrivateKey[i];
  }
 #
- printf("length[%d]\n", length);
+ //printf("length[%d]\n", length);
 
  if (length == sizeof(unsigned short))
  {
-     for (size_t i = 0; i < real_length; i += bytes)
+     for (size_t i = 0; i < encryptedLength; i += bytes)
      {
-         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(temp + i), (int)(real_length - i), 0)) == -1)
+         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(receiveData + i), (int)(encryptedLength - i), 0)) == -1)
          {
              return (-1);
          }
      }
-     printf("1[%d]\n", strlen((const char*)temp));
+    // printf("1[%02x][%02x]\n", receiveData[0], receiveData[1]);
+#if 1
+     Aes256::decrypt(aesKey, receiveData, encryptedLength, descryptData);
 
-     Aes256::decrypt(aesKey, temp, real_length, descryptData);
-
-     printf("2[%d]\n", descryptData.size());
+     //printf("2[%d]\n", descryptData.size());
      data[0] = descryptData[0];
      data[1] = descryptData[1];
-
-     printf("dec[%02x][%02x][%02x][%02x]\n", temp[0], temp[1], data[0], data[1]);
+#endif
+#if 0
+     for (int i = 0; i < length; i++)
+     {
+         printf("%02x", descryptData[i]);
+     }
+#endif
  }
  else
  {
-     for (size_t i = 0; i < real_length; i += bytes)
+     for (size_t i = 0; i < encryptedLength; i += bytes)
      {
-         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(&encryptData + i), (int)(real_length - i), 0)) == -1)
+         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(receiveData + i), (int)(encryptedLength - i), 0)) == -1)
          {
              return (-1);
          }
      }
 
-     Aes256::decrypt(aesKey, encryptData, descryptData);
+     Aes256::decrypt(aesKey, receiveData, encryptedLength, descryptData);
 
-     for (int i = 0; i < real_length; i++)
+     for (int i = 0; i < encryptedLength; i++)
      {
          data[i] = descryptData[i];
      }
  }
+
+ delete receiveData;
 
   return(length);
 }
@@ -384,22 +391,34 @@ ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, si
   ssize_t bytes_written;
 
   ByteArray aesKey(AES_KEY_SIZE);
-  ByteArray plainData(length);
+  //ByteArray plainData(length);
   ByteArray encryptedData;
+  //ByteArray decryptedData;
+
+  int encryptedLength = (length / AES_BLOCK_SIZE + 1) * AES_BLOCK_SIZE + 1;
+  unsigned char* sendData = new unsigned char(encryptedLength);
+
+  memset(sendData, 0x00, encryptedLength);
  
   for (int i = 0; i < AES_KEY_SIZE; i++) {
       aesKey[i] = aesPrivateKey[i];
   }
 
   Aes256::encrypt(aesKey, data, length, encryptedData);
+  
+  printf("plain[%d][%02x][%02x]\n", length, data[0], data[1]);
+  printf("encrypt[%d][%02x][%02x]\n", encryptedLength, encryptedData[0], encryptedData[1]);
 
-  printf("[%s][%d][%d][%02x][%02x][%02x][%02x]\n", data, length, encryptedData.size(), data[0], data[1], encryptedData[0], encryptedData[1]);
-
-  while (total_bytes_written != encryptedData.size())
+  for (int i = 0; i < encryptedLength; i++)
+  {
+      sendData[i] = encryptedData[i];
+  }
+  
+  while (total_bytes_written != encryptedLength)
     {
      bytes_written = send(TcpConnectedPort->ConnectedFd,
-	                               (char *)(&encryptedData+total_bytes_written),
-                                  (int)(encryptedData.size() - total_bytes_written), 0);
+	                               (char *)(sendData + total_bytes_written),
+                                  (int)(encryptedLength - total_bytes_written), 0);
      if (bytes_written == -1)
        {
        return(-1);
@@ -407,7 +426,15 @@ ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, si
      total_bytes_written += bytes_written;
    }
 
-   return(total_bytes_written / 16 + 1);
+    printf("total_bytes_written[%d][%02x][%02x]\n", total_bytes_written, sendData[0], sendData[1]);
+
+    //Aes256::decrypt(aesKey, sendData, encryptedLength, decryptedData);
+
+    //printf("total[%d][%02x][%02x]\n", decryptedData.size(), decryptedData[0], decryptedData[1]);
+
+    delete sendData;
+
+   return(length);
 }
 #else
 ssize_t WriteDataTcp(TTcpConnectedPort* TcpConnectedPort, unsigned char* data, size_t length)

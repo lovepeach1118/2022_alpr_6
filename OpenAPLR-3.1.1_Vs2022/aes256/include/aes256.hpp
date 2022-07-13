@@ -31,6 +31,7 @@ typedef std::vector<unsigned char> ByteArray;
 #define BLOCK_SIZE 16
 
 #define AES_KEY_SIZE    (32)    /* AES256 private key size */
+#define AES_BLOCK_SIZE  (16)  
 
 // AES256 private key - used same key on both sides(client)
 const unsigned char aesPrivateKey[AES_KEY_SIZE] = {
