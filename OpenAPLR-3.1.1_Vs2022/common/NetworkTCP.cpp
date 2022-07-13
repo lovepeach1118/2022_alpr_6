@@ -10,6 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "NetworkTCP.h"
+
+#include "../aes256/include/aes256.hpp"
+
+#pragma comment (lib, "../x64/Release/aes256.lib")
+
 //-----------------------------------------------------------------
 // OpenTCPListenPort - Creates a Listen TCP port to accept
 // connection requests
@@ -292,42 +297,140 @@ ssize_t BytesAvailableTcp(TTcpConnectedPort* TcpConnectedPort)
 //-----------------------------------------------------------------
 // ReadDataTcp - Reads the specified amount TCP data 
 //-----------------------------------------------------------------
+#if 1
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
 {
  ssize_t bytes;
- 
- for (size_t i = 0; i < length; i += bytes)
-    {
-      if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char *)(data+i), (int)(length  - i),0)) == -1) 
-      {
-       return (-1);
-      }
-    }
+
+ ByteArray aesKey(AES_KEY_SIZE);
+ ByteArray plainData(length);
+ ByteArray encryptData;
+ ByteArray descryptData;
+ unsigned char temp[200] = { 0, };
+ int real_length = (length / 16 + 1) * 16 + 1;
+
+ for (int i = 0; i < AES_KEY_SIZE; i++) {
+     aesKey[i] = aesPrivateKey[i];
+ }
+#
+ printf("length[%d]\n", length);
+
+ if (length == sizeof(unsigned short))
+ {
+     for (size_t i = 0; i < real_length; i += bytes)
+     {
+         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(temp + i), (int)(real_length - i), 0)) == -1)
+         {
+             return (-1);
+         }
+     }
+     printf("1[%d]\n", strlen((const char*)temp));
+
+     Aes256::decrypt(aesKey, temp, real_length, descryptData);
+
+     printf("2[%d]\n", descryptData.size());
+     data[0] = descryptData[0];
+     data[1] = descryptData[1];
+
+     printf("dec[%02x][%02x][%02x][%02x]\n", temp[0], temp[1], data[0], data[1]);
+ }
+ else
+ {
+     for (size_t i = 0; i < real_length; i += bytes)
+     {
+         if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(&encryptData + i), (int)(real_length - i), 0)) == -1)
+         {
+             return (-1);
+         }
+     }
+
+     Aes256::decrypt(aesKey, encryptData, descryptData);
+
+     for (int i = 0; i < real_length; i++)
+     {
+         data[i] = descryptData[i];
+     }
+ }
+
   return(length);
 }
+#else
+ssize_t ReadDataTcp(TTcpConnectedPort* TcpConnectedPort, unsigned char* data, size_t length)
+{
+    ssize_t bytes;
+
+    for (size_t i = 0; i < length; i += bytes)
+    {
+        if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char*)(data + i), (int)(length - i), 0)) == -1)
+        {
+            return (-1);
+        }
+    }
+    printf("data[%02x][%02x]\n", data[0], data[1]);
+
+    return(length);
+}
+#endif
 //-----------------------------------------------------------------
 // END ReadDataTcp
 //-----------------------------------------------------------------
 //-----------------------------------------------------------------
 // WriteDataTcp - Writes the specified amount TCP data 
 //-----------------------------------------------------------------
+#if 1
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
 {
   ssize_t total_bytes_written = 0;
   ssize_t bytes_written;
-  while (total_bytes_written != length)
+
+  ByteArray aesKey(AES_KEY_SIZE);
+  ByteArray plainData(length);
+  ByteArray encryptedData;
+ 
+  for (int i = 0; i < AES_KEY_SIZE; i++) {
+      aesKey[i] = aesPrivateKey[i];
+  }
+
+  Aes256::encrypt(aesKey, data, length, encryptedData);
+
+  printf("[%s][%d][%d][%02x][%02x][%02x][%02x]\n", data, length, encryptedData.size(), data[0], data[1], encryptedData[0], encryptedData[1]);
+
+  while (total_bytes_written != encryptedData.size())
     {
      bytes_written = send(TcpConnectedPort->ConnectedFd,
-	                               (char *)(data+total_bytes_written),
-                                  (int)(length - total_bytes_written),0);
+	                               (char *)(&encryptedData+total_bytes_written),
+                                  (int)(encryptedData.size() - total_bytes_written), 0);
      if (bytes_written == -1)
        {
        return(-1);
       }
      total_bytes_written += bytes_written;
    }
-   return(total_bytes_written);
+
+   return(total_bytes_written / 16 + 1);
 }
+#else
+ssize_t WriteDataTcp(TTcpConnectedPort* TcpConnectedPort, unsigned char* data, size_t length)
+{
+    ssize_t total_bytes_written = 0;
+    ssize_t bytes_written;
+    while (total_bytes_written != length)
+    {
+        bytes_written = send(TcpConnectedPort->ConnectedFd, 
+            (char*)(data + total_bytes_written),
+            (int)(length - total_bytes_written), 0);
+        if (bytes_written == -1)
+        {
+            return(-1);
+        }
+        total_bytes_written += bytes_written;
+    }
+
+    printf("data[%02x][%02x]\n", data[0], data[1]);
+
+    return(total_bytes_written);
+}
+#endif
 //-----------------------------------------------------------------
 // END WriteDataTcp
 //-----------------------------------------------------------------
